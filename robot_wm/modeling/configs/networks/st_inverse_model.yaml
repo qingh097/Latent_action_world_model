@@ -1,0 +1,11 @@
+_target_: robot_wm.modeling.networks.st_inverse_model.get_arch
+arch: ???
+num_actions: ???
+input_dim: ???
+output_dim: ???
+rope_end: 1920
+rope_theta: 50000
+attn_drop_prob: 0.0
+proj_drop_prob: 0.0
+mlp_drop_prob: 0.0
+residual_drop_prob: 0.0

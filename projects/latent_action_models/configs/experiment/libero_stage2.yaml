@@ -1,0 +1,38 @@
+# @package _global_
+# Adaptation STAGE 2 of 3 (paper Sec. 3.2) on LIBERO: FREEZE the forward model and train the
+# action projector from scratch, so it learns to map this embodiment's raw action (robot
+# action + camera motion) into the pretrained latent-action space. Starts from stage 1.
+#   stage 1 -> IDM + FDM
+#   stage 2 -> freeze FDM, train the action projector      (this file)
+#   stage 3 -> projector + FDM jointly
+#   torchrun --standalone --nproc_per_node=8 train.py +experiment=libero_stage2
+defaults:
+  - libero_stage1
+  - override /models@model: explicit_action_dit_model
+  - _self_
+
+name: libero_stage2
+
+data_loader: {batch_size: 1, num_workers: 12}
+
+model:
+  # The projector replaces the IDM and must emit into the SAME space the pretrained
+  # conditioning heads were trained on: action_encoder.latent_dim and morph_dim both follow
+  # latent_action_dim. ExplicitActionDiTModel drops the IDM-only modules below.
+  inverse_model: null
+  rgb_pos_embed: null
+  action_pos_embed: null
+  action_encoder:
+    action_dim: ${dataset.padding_dim}
+    chunk_size: ${dataset.transform.chunk_size}
+
+optimizer_factory: {lr: 1e-4}
+
+trainer:
+  config:
+    max_iter: 20_000
+    load_path: ${oc.env:LACWM_RUNS,./runs}/libero_stage1/snapshot.pt
+    # Freeze the forward model: only the action projector trains, so it is forced to
+    # land in the latent space the pretrained world model already understands rather
+    # than the world model bending to whatever the projector emits.
+    freeze_prefixes: ["rgb_tokenizer", "forward_model", "action_pool"]

@@ -1,0 +1,144 @@
+# @package _global_
+# Adaptation STAGE 1 of 3 (paper Sec. 3.2) on LIBERO (agentview + wrist): finetune the IDM
+# and FDM on the new embodiment, still as a LATENT-action model, starting from the
+# pretraining checkpoint ($LACWM_PRETRAIN_CKPT).
+#   stage 1 -> IDM + FDM                                  (this file)
+#   stage 2 -> freeze FDM, train the action projector from scratch
+#   stage 3 -> projector + FDM jointly
+# Clip geometry, observation layout and conditioning pathways match pretrain.yaml.
+#   torchrun --standalone --nproc_per_node=8 train.py +experiment=libero_stage1
+defaults:
+  - override /datasets@dataset: transformed_multi_libero
+  - override /datasets@val_dataset: transformed_multi_libero
+  - override /datasets@viz_dataset: transformed_multi_libero
+  - override /models@model: latent_action_dit_model
+  - override /tokenizers/rgb@model.rgb_tokenizer: wan_vae
+  - override /optimizers@optimizer_factory: adamw
+  - override /lr_schedulers@lr_scheduler_factory: linear_warmup_cosine_decay
+
+name: libero_stage1
+
+dataset: &ds
+  padding_dim: 157
+  seed: ${seed}
+  infinite: true
+  img_augment: True   # augmented in [0,1] before re-normalizing to [-1,1] (see MultiDataset)
+  transform:
+    # Same clip as pretraining: 9 sparse history frames + 8 future (see pretrain.yaml).
+    sample_size: 17
+    chunk_size: 5
+    history_frames: 9
+    history_stride_mult: 2   # window = 125 raw steps; a third of LIBERO episodes are
+                             # shorter and pad the history at the start
+    history_frames_anchor: 8
+  datasets:
+    Libero:
+      manifest: ${oc.env:LACWM_DATA,./data}/libero/manifest.csv
+      seed: ${seed}
+      transform:
+        sample_size: ${dataset.transform.sample_size}
+        chunk_size: ${dataset.transform.chunk_size}
+        history_frames: ${dataset.transform.history_frames}
+        history_stride_mult: ${dataset.transform.history_stride_mult}
+        multiview: true
+        wrist_mask_prob: 0.0
+        resize_to: [180, 320]   # pretraining's per-view size
+        # LiberoTransform defaults to ImageNet stats; the Wan VAE expects [-1,1]
+        mean: [0.5, 0.5, 0.5]
+        std: [0.5, 0.5, 0.5]
+val_dataset:
+  <<: *ds
+  img_augment: False
+viz_dataset:
+  <<: *ds
+  img_augment: False
+
+val_data_loader:
+  - _target_: torchdata.stateful_dataloader.StatefulDataLoader
+    dataset: ${val_dataset}
+    batch_size: ${data_loader.batch_size}
+    num_workers: 2
+    pin_memory: true
+    prefetch_factor: 2
+viz_data_loader:
+  - _target_: torchdata.stateful_dataloader.StatefulDataLoader
+    dataset: ${viz_dataset}
+    batch_size: 2
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 1
+    persistent_workers: False
+
+data_loader:
+  batch_size: 16
+  num_workers: 16
+  pin_memory: true
+  prefetch_factor: 4
+  persistent_workers: true
+
+model:
+  latent_action_dim: 128
+  latent_views: 2
+  # IDM reads the loader's independently augmented view; FDM is supervised on rgb.
+  cross_augment: true
+  rgb_tokenizer: {output_dim: 16, input_mean: [0.5, 0.5, 0.5], input_std: [0.5, 0.5, 0.5]}
+  rgb_pos_embed:
+    _args_: ["${dataset.transform.sample_size}", 24, "${mul:40,${model.latent_views}}"]   # latent width = 40 per view (320 px / 8)
+  inverse_model: {arch: small, num_actions: 1, rope_end: 6144, gradient_checkpointing: true}
+  action_pos_embed:
+    _args_: ["${dataset.transform.sample_size}", "${model.inverse_model.num_actions}"]
+  forward_model:
+    latent_action_dim: "${model.latent_action_dim}"
+    lora_rank: 1024
+    lora_alpha: 2048
+    lora_dropout: 0.05
+    gradient_checkpointing: true
+    action_conditioning: both
+  num_history_frames: 9
+  num_future_frames: 8
+  morphology_tokens:
+    _target_: robot_wm.modeling.modules.learnable_embeddings.LearnableEmbeddings
+    num_embeddings: 10
+    # added onto the latent action, so it has to track latent_action_dim
+    embedding_dim: ${model.latent_action_dim}
+  # No motion decoder. It exists to ANCHOR the latent space during pretraining (robot
+  # action in the first half, camera motion in the second); that anchoring is inherited
+  # from the pretrained checkpoint. A freshly initialised head for this embodiment would
+  # anchor nothing and would pull the latent away from the space the projector must target
+  # in stage 2. Stage 1 is supervised by the image-prediction loss alone.
+  action_decoder: null
+  loss_scheduler:
+    pretrain_steps: 0
+    warmup_steps: 10_000
+    total_steps: ${trainer.config.max_iter}
+    losses: ["teacher-forcing"]
+    seed: ${seed}
+  config:
+    flow_loss_on_future_only: true
+
+optimizer_factory: {lr: 3e-5, betas: [0.9, 0.95]}
+lr_scheduler_factory:
+  lr_lambda:
+    warmup_steps: 2_000
+    total_steps: ${trainer.config.max_iter}
+    final_learning_rate: 1e-6
+
+wandb: {project: lacwm}
+
+trainer:
+  config:
+    max_iter: 20_000
+    logging: {log_every: 50}
+    saving: {save_every: 1000}
+    validation: {val_every: 1000, n_val_samples: 25}
+    visualization: {viz_every: 1000}
+    gradient_clipping: {max_norm: 1.0}
+    load_path: ${oc.env:LACWM_PRETRAIN_CKPT,./checkpoints/pretrain_snapshot.pt}
+    require_load_path: true   # fail loudly instead of training from scratch
+    exclude_keys: []
+
+hydra:
+  run:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}
+  sweep:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}

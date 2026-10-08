@@ -1,0 +1,19 @@
+# @package _global_
+# Adaptation STAGE 3 of 3 (paper Sec. 3.2) on LIBERO: train the action projector and the
+# forward model jointly, starting from stage 2. At inference only the projector and the
+# forward model are used -- the inverse model is not needed, since actions are given.
+#   stage 1 -> IDM + FDM
+#   stage 2 -> freeze FDM, train the action projector
+#   stage 3 -> projector + FDM jointly                      (this file)
+#   torchrun --standalone --nproc_per_node=8 train.py +experiment=libero_stage3
+defaults:
+  - libero_stage2
+  - _self_
+
+name: libero_stage3
+
+trainer:
+  config:
+    max_iter: 30_000
+    load_path: ${oc.env:LACWM_RUNS,./runs}/libero_stage2/snapshot.pt
+    freeze_prefixes: []

@@ -1,0 +1,17 @@
+# Wan-DiT latent-action world model env. Create from the repo root:
+#   conda env create -f environment.yaml
+#   conda activate lacwm-dit
+# (installs cu128 PyTorch + requirements.txt + this package). Adjust the cu128
+# index URL if your server uses a different CUDA.
+name: lacwm-dit
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.7.1
+      - torchvision==0.22.1
+      - -r requirements.txt
+      - -e .

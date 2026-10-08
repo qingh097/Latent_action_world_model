@@ -1,0 +1,22 @@
+_target_: robot_wm.datasets.multi_dataset.MultiDataset
+padding_dim: ???
+seed: ???
+infinite: true
+transform:
+  sample_size: ???
+  chunk_size: ???
+datasets:
+  Libero:
+    _target_: robot_wm.datasets.libero.dataset.LiberoDataset
+    manifest: ???
+    seed: ???
+    transform:
+      _target_: robot_wm.datasets.libero.transform.LiberoTransform
+      cameras: ["agentview_rgb", "wrist_rgb"]
+      output_keys: ['rgb', 'actions', 'mask']
+      sample_size: ???
+      chunk_size: ???
+      resize_to: [256, 256]
+      action_type: delta-state+abs_finger+camera+joint_states
+      seed: ${seed}
+      multiview: false

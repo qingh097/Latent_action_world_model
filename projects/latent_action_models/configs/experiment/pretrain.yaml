@@ -1,0 +1,170 @@
+# @package _global_
+# Cross-embodiment PRETRAINING of the latent-action world model on
+# ABC + Agibot + DROID + EgoDex.
+#
+#   inverse model (IDM) : frames -> latent action z
+#   forward model (FDM) : Wan2.1-Fun-1.3B-Control DiT, dense (end-to-end) finetuning,
+#                         conditioned on z only (control channel + clip tokens)
+#   motion decoder      : z -> robot action (first half of z) + camera motion (second half)
+#
+# Clip = 9 sparse history + 8 future = 17 frames. Adaptation stages 1-3
+# (libero_stage*.yaml) use the same clip geometry, observation layout and conditioning
+# pathways; only the action source differs (IDM here, an action projector in stages 2-3).
+#
+# Launch (8 GPU):
+#   torchrun --standalone --nproc_per_node=8 train.py +experiment=pretrain
+# Without ABC:
+#   ... +experiment=pretrain '~dataset.datasets.ABC' '~val_dataset.datasets.ABC' '~viz_dataset.datasets.ABC'
+defaults:
+  - override /datasets@dataset: transformed_multi_abc_agibot_droid_egodex
+  - override /datasets@val_dataset: transformed_multi_abc_agibot_droid_egodex
+  - override /datasets@viz_dataset: transformed_multi_abc_agibot_droid_egodex
+  - override /models@model: latent_action_dit_model
+  - override /tokenizers/rgb@model.rgb_tokenizer: wan_vae
+  - override /optimizers@optimizer_factory: adamw
+  - override /lr_schedulers@lr_scheduler_factory: linear_warmup_cosine_decay
+
+name: pretrain_abc_agibot_droid_egodex
+
+dataset: &ds
+  padding_dim: 157
+  seed: ${seed}
+  infinite: true
+  img_augment: True   # augmented in [0,1] before re-normalizing to [-1,1] (see MultiDataset)
+  # The human data gets a heavier photometric pipeline than the robot sources: it is the
+  # only non-robot appearance domain here, so this keeps the model from leaning on its
+  # look instead of its motion. Photometric only -- a geometric augment would contradict
+  # the camera-motion targets.
+  strong_augment_datasets: ["EgoDex"]
+  transform:
+    # Ctrl-World conditions on 7 history frames spaced 1-2s apart. Wan's temporal VAE packs
+    # 4 frames per latent and the history/future split happens at latent granularity, so the
+    # history length must be 1+4m: 9 is the nearest valid value to their 7.
+    # history_stride_mult 2 -> 10 raw steps between history frames (~0.67s at 15Hz, ~0.5s at
+    # 20Hz), with the future stride left at chunk_size so the prediction horizon is unchanged.
+    sample_size: 17   # 9 history + 8 future
+    chunk_size: 5
+    history_frames: 9
+    history_stride_mult: 2   # window = 40*m + 45 raw steps (125 at m=2); shorter episodes
+                             # pad the history at the start (see sparse_history_inds)
+    history_frames_anchor: 8   # = history_frames - 1
+val_dataset:
+  <<: *ds
+  img_augment: False
+viz_dataset:
+  <<: *ds
+  img_augment: False
+
+val_data_loader:
+  - _target_: torchdata.stateful_dataloader.StatefulDataLoader
+    dataset: ${val_dataset}
+    batch_size: ${data_loader.batch_size}
+    num_workers: 2
+    pin_memory: true
+    prefetch_factor: 2
+viz_data_loader:
+  - _target_: torchdata.stateful_dataloader.StatefulDataLoader
+    dataset: ${viz_dataset}
+    batch_size: 2
+    num_workers: 1
+    pin_memory: true
+    prefetch_factor: 1
+    persistent_workers: False
+
+data_loader:
+  batch_size: 16
+  num_workers: 16
+  pin_memory: true
+  prefetch_factor: 4
+  persistent_workers: true
+
+model:
+  # Every camera view is present (no wrist dropping), so the latent action has to carry
+  # more than the 64-d default.
+  latent_action_dim: 128
+  # Views are encoded separately by the temporal VAE and concatenated along width.
+  latent_views: 3
+  # NO explicit action reaches the DiT during pretraining. Both conditioning pathways
+  # carry the LATENT action: action_to_control writes it into the control channel and
+  # action_to_tokens writes it into the clip branch. The ground-truth action is used only
+  # as a target for the motion decoder.
+  # IDM reads the loader's independently augmented view; FDM is supervised on rgb.
+  cross_augment: true
+  rgb_tokenizer: {output_dim: 16, input_mean: [0.5, 0.5, 0.5], input_std: [0.5, 0.5, 0.5]}
+  rgb_pos_embed:
+    _args_: ["${dataset.transform.sample_size}", 24, "${mul:40,${model.latent_views}}"]   # latent width = 40 per view (320 px / 8)
+  inverse_model: {arch: small, num_actions: 1, rope_end: 6144, gradient_checkpointing: true}
+  action_pos_embed:
+    _args_: ["${dataset.transform.sample_size}", "${model.inverse_model.num_actions}"]
+  forward_model:
+    # End-to-end (dense) finetuning of the Wan DiT -- no LoRA adapters. FP32 parameters are
+    # the optimizer master weights; the trainer computes in BF16 autocast.
+    latent_action_dim: "${model.latent_action_dim}"
+    finetune_mode: full
+    full_finetune_param_dtype: float32
+    gradient_checkpointing: true
+    action_conditioning: both
+  num_history_frames: 9
+  num_future_frames: 8
+  morphology_tokens:
+    _target_: robot_wm.modeling.modules.learnable_embeddings.LearnableEmbeddings
+    num_embeddings: 10
+    # added onto the latent action, so it has to track latent_action_dim
+    embedding_dim: ${model.latent_action_dim}
+  # One decoder head per morphology (keys = Morphology_Mapping ids: 0 DROID, 2 EgoDex,
+  # 6 Agibot, 9 ABC). The first half of z decodes the robot action, the second half the
+  # camera motion; per-head dims are (action dims + 9 camera dims) * chunk_size.
+  action_decoder:
+    _target_: robot_wm.modeling.modules.mlp.SplitMultiMLP
+    input_dim: ${mul:${model.latent_action_dim},${model.inverse_model.num_actions}}
+    split_type:
+      action_type_split:
+        "ee": [0, "${div:${model.action_decoder.input_dim},2}"]
+        "joint_states": [0, "${div:${model.action_decoder.input_dim},2}"]
+        "camera": ["${div:${model.action_decoder.input_dim},2}", "${model.action_decoder.input_dim}"]
+      "0": {"ee": 50,  "camera": 45}
+      "2": {"ee": 740, "camera": 45}
+      "6": {"ee": 100, "joint_states": 70, "camera": 45}
+      "9": {"ee": 70,  "camera": 45}
+    decoders:
+      "0": {target: robot_wm.modeling.tokenizers.action.decoder.ActionXattenDecoder, input_dim: "${model.action_decoder.input_dim}", hidden_dim: 1024, output_dim: 95,  rgb_latent_dim: "${model.rgb_tokenizer.output_dim}"}
+      "2": {target: robot_wm.modeling.tokenizers.action.decoder.ActionXattenDecoder, input_dim: "${model.action_decoder.input_dim}", hidden_dim: 1024, output_dim: 785, rgb_latent_dim: "${model.rgb_tokenizer.output_dim}"}
+      "6": {target: robot_wm.modeling.tokenizers.action.decoder.ActionXattenDecoder, input_dim: "${model.action_decoder.input_dim}", hidden_dim: 1024, output_dim: 215, rgb_latent_dim: "${model.rgb_tokenizer.output_dim}"}
+      "9": {target: robot_wm.modeling.tokenizers.action.decoder.ActionXattenDecoder, input_dim: "${model.action_decoder.input_dim}", hidden_dim: 1024, output_dim: 115, rgb_latent_dim: "${model.rgb_tokenizer.output_dim}"}
+  loss_scheduler:
+    pretrain_steps: 0
+    warmup_steps: 10_000
+    total_steps: ${trainer.config.max_iter}
+    ae_only_steps: 80_001
+    action_decode_steps: 80_000
+    losses: ["teacher-forcing"]
+    seed: ${seed}
+  config:
+    action_decoding_weight: 0.1
+    action_decoding_loss_type: "l1"
+    flow_loss_on_future_only: true
+
+optimizer_factory: {lr: 3e-5, betas: [0.9, 0.95]}   # dense FT: lower than the 1e-4 used with LoRA
+lr_scheduler_factory:
+  lr_lambda:
+    warmup_steps: 2_000
+    total_steps: ${trainer.config.max_iter}
+    final_learning_rate: 1e-6
+
+wandb: {project: lacwm}
+
+trainer:
+  config:
+    max_iter: 60_000
+    logging: {log_every: 50}
+    saving: {save_every: 1000}
+    validation: {val_every: 1000, n_val_samples: 25}
+    visualization: {viz_every: 1000}
+    gradient_clipping: {max_norm: 1.0}
+
+# Fixed run dir, so a preempted job resumes from its own snapshot.
+hydra:
+  run:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}
+  sweep:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}

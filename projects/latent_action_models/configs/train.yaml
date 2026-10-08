@@ -1,0 +1,84 @@
+defaults:
+  - _self_
+  - datasets@dataset: ???
+  - datasets@val_dataset: ???
+  - datasets@viz_dataset: ???
+  - models@model: ???
+  - optimizers@optimizer_factory: ???
+  - lr_schedulers@lr_scheduler_factory: ???
+  - wandb@wandb: default
+  - override hydra/job_logging: custom
+  - override hydra/output: custom
+  - override hydra/launcher: full_node
+
+name: ???
+seed: 1234
+debug: false
+
+data_loader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  dataset: ${dataset}
+  batch_size: ???
+  num_workers: 8
+  pin_memory: true
+  prefetch_factor: 2
+  persistent_workers: True
+
+val_data_loader:
+  - _target_: torchdata.stateful_dataloader.StatefulDataLoader
+    dataset: ${val_dataset}
+    batch_size: ???
+    num_workers: 2
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: False
+
+viz_data_loader:
+  - _target_: torchdata.stateful_dataloader.StatefulDataLoader
+    dataset: ${viz_dataset}
+    batch_size: ???
+    num_workers: 2
+    pin_memory: true
+    prefetch_factor: 2
+    persistent_workers: False
+
+trainer:
+  _target_: robot_wm.utils.trainer.Trainer
+  model: ${model}
+  optimizer_factory: ${optimizer_factory}
+  lr_scheduler_factory: ${lr_scheduler_factory}
+  data_loader: ${data_loader}
+  val_data_loader: ${val_data_loader}
+  viz_data_loader: ${viz_data_loader}
+  config:
+    max_iter: ???
+    logging:
+      log_every: 50
+    saving:
+      save_every: 1000
+      save_path: ${hydra:runtime.output_dir}/snapshot.pt
+    validation:
+      val_every: 1000
+      n_val_samples: 25
+      save_best: True
+    visualization:
+      viz_every: 1000
+      viz_path: ${hydra:runtime.output_dir}/visualization
+    gradient_clipping:
+      max_norm: 1.0
+      norm_type: 2.0
+      error_if_nonfinite: false
+    dtype: "bfloat16"
+    amp_enabled: true
+
+hydra:
+  job:
+    name: '${name}'
+  searchpath:
+     - pkg://robot_wm.datasets.configs
+     - pkg://robot_wm.modeling.configs
+     - pkg://robot_wm.utils.configs
+
+wandb:
+  project: "latent-action-models-${oc.env:USER}"
+  tags: ["${model._target_}"]

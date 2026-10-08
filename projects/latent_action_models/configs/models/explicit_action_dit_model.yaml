@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - /tokenizers/rgb@rgb_tokenizer: ???
+  - /networks@forward_model: wan_forward
+
+_target_: lam.explicit_action_dit_model.ExplicitActionDiTModel
+latent_action_dim: 64
+num_history_frames: 5
+num_future_frames: 8
+rgb_tokenizer: ${rgb_tokenizer}
+forward_model:
+  latent_action_dim: ${..latent_action_dim}
+action_encoder:
+  _target_: robot_wm.modeling.networks.action_encoder.ActionEncoderMLP
+  action_dim: 157
+  chunk_size: 5
+  latent_dim: ${..latent_action_dim}
+  morph_dim: ${..latent_action_dim}
+  hidden: 512
+  num_layers: 3
+loss_scheduler:
+  _target_: lam.loss_scheduler.CustomLossScheduler
+  pretrain_steps: ???
+  warmup_steps: ???
+  total_steps: ???
+  seed: ???
+  losses: ["teacher-forcing"]
+config:
+  flow_loss_on_future_only: true

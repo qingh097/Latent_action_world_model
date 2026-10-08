@@ -1,0 +1,6 @@
+# @package hydra
+run:
+  dir: runs/${name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+sweep:
+  dir: runs/${name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  subdir: ${hydra.job.num}

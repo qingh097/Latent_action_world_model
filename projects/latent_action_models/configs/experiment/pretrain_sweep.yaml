@@ -1,0 +1,36 @@
+# @package _global_
+# Per-GPU batch-size sweep for pretrain.yaml: 3 iterations, no validation or saving.
+# Pass the batch size on the command line (tools/launch/batch_sweep.sbatch does this):
+#   torchrun --standalone --nproc_per_node=1 train.py +experiment=pretrain_sweep data_loader.batch_size=8
+defaults:
+  - pretrain
+  - _self_
+
+name: pretrain_sweep
+
+dataset:
+  datasets: &small
+    Droid: {subsample_traj: 64}
+    EgoDex: {subsample_traj: 64}
+    Agibot: {subsample_traj: 64}
+    ABC: {subsample_traj: 64}
+val_dataset: {datasets: *small}
+viz_dataset: {datasets: *small}
+
+data_loader: {batch_size: 8, num_workers: 8}
+
+wandb: {mode: disabled}
+
+trainer:
+  config:
+    max_iter: 3
+    logging: {log_every: 1}
+    saving: {save_every: 1_000_000, enabled: false}
+    validation: {val_every: 1_000_000, n_val_samples: 2}
+    visualization: {viz_every: 1_000_000}
+
+hydra:
+  run:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}/${now:%Y-%m-%d_%H-%M-%S}

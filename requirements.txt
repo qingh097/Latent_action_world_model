@@ -1,0 +1,41 @@
+# Python 3.10. Install PyTorch first, matched to your CUDA (this env uses cu128):
+#   pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+# then:
+#   pip install -r requirements.txt
+#   pip install -e .
+
+# diffusion / Wan2.1-Fun forward model
+diffusers==0.38.0
+accelerate==1.6.0
+peft==0.19.1
+safetensors==0.8.0
+huggingface_hub[cli]==0.30.2
+ftfy==6.3.1
+librosa==0.11.0
+sentencepiece==0.2.1
+transformers==5.13.1   # umT5 text encoder (tools/launch/gen_null_prompt.py)
+
+# config + training framework
+hydra-core==1.3.2
+omegaconf==2.3.0
+einops==0.8.1
+kornia==0.8.2
+torchdata==0.11.0
+wandb==0.27.0
+
+# data IO (datasets + transforms)
+numpy==2.0.1
+scipy==1.15.3
+pandas==2.2.3
+pyarrow==24.0.0
+h5py==3.12.1
+opencv-python==4.11.0.86
+decord==0.6.0
+av==17.1.0
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
+tqdm
+
+# ABC mcap preprocessing (robot_wm/datasets/abc/preprocessing/)
+mcap==1.4.0
+mcap-protobuf-support==0.5.4

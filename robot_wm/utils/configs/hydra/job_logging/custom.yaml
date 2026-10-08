@@ -1,0 +1,27 @@
+version: 1
+formatters:
+  colorlog:
+    '()': 'colorlog.ColoredFormatter'
+    format: "%(log_color)s%(relativeCreated)8d %(levelname)8s %(name).10s%(reset)s %(message)s"
+    log_colors:
+      DEBUG: purple
+      INFO: green
+      WARNING: yellow
+      ERROR: red
+      CRITICAL: red
+  simple:
+    format: "%(relativeCreated)8d %(levelname)8s %(name).10s %(message)s"
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: colorlog
+    stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    formatter: simple
+    filename: ${hydra:runtime.output_dir}/${hydra:job.name}.log
+root:
+  level: INFO
+  handlers: [console, file]
+
+disable_existing_loggers: false

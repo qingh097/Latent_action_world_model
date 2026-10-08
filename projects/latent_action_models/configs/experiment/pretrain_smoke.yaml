@@ -1,0 +1,37 @@
+# @package _global_
+# Correctness smoke for pretrain.yaml: 12 iterations on 1 GPU over a handful of episodes per
+# source, with validation and visualization exercised and checkpointing off.
+#   torchrun --standalone --nproc_per_node=1 train.py +experiment=pretrain_smoke
+defaults:
+  - pretrain
+  - _self_
+
+name: pretrain_smoke
+
+dataset:
+  datasets: &tiny
+    Droid: {subsample_traj: 8}
+    EgoDex: {subsample_traj: 8}
+    Agibot: {subsample_traj: 8}
+    ABC: {subsample_traj: 8}
+val_dataset: {datasets: *tiny}
+viz_dataset: {datasets: *tiny}
+
+data_loader: {batch_size: 1, num_workers: 8}
+
+wandb: {mode: disabled}
+
+trainer:
+  config:
+    max_iter: 12
+    logging: {log_every: 1}
+    saving: {save_every: 1_000_000, enabled: false}
+    validation: {val_every: 6, n_val_samples: 2}
+    visualization: {viz_every: 6}
+
+# Timestamped on purpose: a smoke must never resume from another smoke's snapshot.
+hydra:
+  run:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}/${now:%Y-%m-%d_%H-%M-%S}

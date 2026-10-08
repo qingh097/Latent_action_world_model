@@ -1,0 +1,7 @@
+_target_: robot_wm.modeling.tokenizers.rgb.wan_vae.WanVAETokenizer
+model_path: ${oc.env:WAN_DIR,./checkpoints/wan_fun_1.3b_control}
+config_path: ${oc.env:VIDEOX_HOME,./VideoX-Fun}/config/wan2.1/wan_civitai.yaml
+output_dim: 16
+input_range: normal
+input_mean: [0.5, 0.5, 0.5]
+input_std: [0.5, 0.5, 0.5]

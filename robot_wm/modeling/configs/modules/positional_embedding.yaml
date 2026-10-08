@@ -1,0 +1,4 @@
+_target_: robot_wm.modeling.modules.positional_embedding.PositionalEmbedding
+_args_: ???  # sizes
+dim: ???
+use_sincos: true

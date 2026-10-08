@@ -1,0 +1,30 @@
+# @package _global_
+# Correctness smoke for libero_stage1.yaml: 12 iterations on 1 GPU, validation and
+# visualization exercised, checkpointing off. Runs without the earlier stage's checkpoint
+# (randomly initialised heads), so it checks wiring, not learning.
+#   torchrun --standalone --nproc_per_node=1 train.py +experiment=libero_stage1_smoke
+defaults:
+  - libero_stage1
+  - _self_
+
+name: libero_stage1_smoke
+
+data_loader: {batch_size: 1, num_workers: 4}
+
+wandb: {mode: disabled}
+
+trainer:
+  config:
+    max_iter: 12
+    logging: {log_every: 1}
+    saving: {save_every: 1_000_000, enabled: false}
+    validation: {val_every: 6, n_val_samples: 2}
+    visualization: {viz_every: 6}
+    require_load_path: false
+
+# Timestamped on purpose: a smoke must never resume from another smoke's snapshot.
+hydra:
+  run:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ${oc.env:LACWM_RUNS,./runs}/${name}/${now:%Y-%m-%d_%H-%M-%S}

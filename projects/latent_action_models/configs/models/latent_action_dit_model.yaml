@@ -1,0 +1,38 @@
+defaults:
+  - _self_
+  - /tokenizers/rgb@rgb_tokenizer: ???
+  - /modules@rgb_pos_embed: positional_embedding
+  - /networks@inverse_model: st_inverse_model
+  - /modules@action_pos_embed: positional_embedding
+  - /networks@forward_model: wan_forward
+
+_target_: lam.latent_action_dit_model.LatentActionDiTModel
+latent_action_dim: 64
+num_history_frames: 5
+num_future_frames: 8
+rgb_tokenizer: ${rgb_tokenizer}
+rgb_pos_embed:
+  _args_: ???
+  dim: ${..rgb_tokenizer.output_dim}
+inverse_model:
+  arch: ???
+  num_actions: 1
+  input_dim: ${..rgb_tokenizer.output_dim}
+  output_dim: ${..latent_action_dim}
+action_pos_embed:
+  _args_: ???
+  dim: ${..latent_action_dim}
+action_decoder:
+forward_model:
+  latent_action_dim: ${..latent_action_dim}
+loss_scheduler:
+  _target_: lam.loss_scheduler.CustomLossScheduler
+  pretrain_steps: ???
+  warmup_steps: ???
+  total_steps: ???
+  seed: ???
+  losses: ["teacher-forcing"]
+config:
+  action_decoding_weight: 0.1
+  action_decoding_loss_type: l1
+  flow_loss_on_future_only: true

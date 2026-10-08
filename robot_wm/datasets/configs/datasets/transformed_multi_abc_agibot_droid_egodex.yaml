@@ -1,0 +1,112 @@
+# Cross-embodiment pretraining mix: ABC (bimanual YAM) + Agibot + DROID + EgoDex (human).
+# To train without a source, delete it on the command line, e.g. for ABC:
+#   '~dataset.datasets.ABC' '~val_dataset.datasets.ABC' '~viz_dataset.datasets.ABC'
+_target_: robot_wm.datasets.multi_dataset.MultiDataset
+padding_dim: ???
+seed: ${seed}
+infinite: true
+# Camera motion: each sub-dataset writes the ABSOLUTE 9-d pose (pos3 + rot6d) of its
+# ego / third-person camera into a 9-d slot of the action vector; MultiDataset re-references
+# it to the last history frame so the camera-motion target means the same thing for every
+# morphology. Agibot supplies its head-camera extrinsics and EgoDex its head-camera
+# transform; DROID and ABC have fixed cameras, so their slot is zero and is left alone.
+fill_relative_camera_pose: true
+# index of the LAST history frame in the window: poses are expressed relative to it.
+# Must track dataset.transform.history_frames - 1.
+camera_pose_anchor: ${dataset.transform.history_frames_anchor}
+transform:
+  sample_size: ???
+  chunk_size: ???
+  history_frames: ???
+  history_stride_mult: 1
+  history_frames_anchor: ???
+datasets:
+  Droid:
+    # TFDS by default. For the LeRobot copy that setup_training.sh downloads, set
+    #   DROID_LOADER=robot_wm.datasets.droid.lerobot_dataset.DroidLeRobotDataset
+    #   DROID_DATA_DIR=$LACWM_DATA/droid_lerobot
+    # Both loaders take the same constructor arguments.
+    _target_: ${oc.env:DROID_LOADER,robot_wm.datasets.droid.tfds_dataset.DroidTFDSDataset}
+    data_dir: ${oc.env:DROID_DATA_DIR,./data/droid}
+    seed: ${seed}
+    infinite: ${dataset.infinite}
+    subsample_traj: 10000
+    transform:
+      _target_: robot_wm.datasets.droid.transform.DroidTransform
+      cameras: ["exterior_image_1_left", "wrist_image_left"]   # ego + 1 wrist
+      output_keys: ["rgb", "actions", "mask"]
+      sample_size: ${dataset.transform.sample_size}
+      chunk_size: ${dataset.transform.chunk_size}
+      history_frames: ${dataset.transform.history_frames}
+      history_stride_mult: ${dataset.transform.history_stride_mult}
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+      resize_to: [180, 320]
+      action_type: delta-state+camera+abs_finger
+      multiview: true
+      num_views: 3
+      wrist_mask_prob: 0.0
+      seed: ${seed}
+  EgoDex:
+    _target_: robot_wm.datasets.egodex.dataset.EgoDexDataset
+    manifest: ${oc.env:EGODEX_MANIFEST,${oc.env:LACWM_DATA,./data}/egodex/manifest.csv}
+    seed: ${seed}
+    subsample_traj: 10000
+    transform:
+      _target_: robot_wm.datasets.egodex.transform.EgoDexTransform
+      cameras: ["ego_centric_image"]   # ego only (no wrist) -> zero-padded to num_views
+      output_keys: ["rgb", "actions", "mask"]
+      sample_size: ${dataset.transform.sample_size}
+      chunk_size: ${dataset.transform.chunk_size}
+      history_frames: ${dataset.transform.history_frames}
+      history_stride_mult: ${dataset.transform.history_stride_mult}
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+      resize_to: [180, 320]
+      action_type: delta-state+camera+abs_finger
+      num_views: 3
+      seed: ${seed}
+  Agibot:
+    _target_: robot_wm.datasets.agibot.dataset.AgibotDataset
+    manifest: ${oc.env:AGIBOT_MANIFEST,${oc.env:LACWM_DATA,./data}/agibot/manifest.csv}
+    seed: ${seed}
+    infinite: ${dataset.infinite}
+    subsample_traj: 10000
+    transform:
+      _target_: robot_wm.datasets.agibot.transform.AgibotTransform
+      cameras: ["head_color", "hand_left_color", "hand_right_color"]   # ego + 2 wrist
+      output_keys: ["rgb", "actions", "mask"]
+      sample_size: ${dataset.transform.sample_size}
+      chunk_size: ${dataset.transform.chunk_size}
+      history_frames: ${dataset.transform.history_frames}
+      history_stride_mult: ${dataset.transform.history_stride_mult}
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+      resize_to: [180, 320]
+      action_type: delta-state+camera+abs_finger
+      multiview: true
+      num_views: 3
+      wrist_mask_prob: 0.0
+      seed: ${seed}
+  ABC:
+    _target_: robot_wm.datasets.abc.dataset.ABCDataset
+    manifest: ${oc.env:ABC_MANIFEST,${oc.env:LACWM_DATA,./data}/abc_pp/manifest.txt}
+    seed: ${seed}
+    infinite: ${dataset.infinite}
+    subsample_traj: 10000
+    transform:
+      _target_: robot_wm.datasets.abc.transform.ABCTransform
+      cameras: ["top", "left_wrist", "right_wrist"]   # ego + 2 wrist
+      output_keys: ["rgb", "actions", "mask"]
+      sample_size: ${dataset.transform.sample_size}
+      chunk_size: ${dataset.transform.chunk_size}
+      history_frames: ${dataset.transform.history_frames}
+      history_stride_mult: ${dataset.transform.history_stride_mult}
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+      resize_to: [180, 320]
+      action_type: action+camera   # 12 joint + 2 gripper targets, then the (zero) camera slot
+      multiview: true
+      num_views: 3
+      wrist_mask_prob: 0.0
+      seed: ${seed}

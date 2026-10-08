@@ -1,0 +1,10 @@
+_target_: torch.optim.lr_scheduler.LambdaLR
+_partial_: true
+lr_lambda:
+  _target_: robot_wm.utils.lr_schedulers.linear_warmup_cosine_decay
+  _partial_: true
+  warmup_steps: ???
+  total_steps: ???
+  start_learning_rate: 0
+  max_learning_rate: ${optimizer_factory.lr}
+  final_learning_rate: ???
